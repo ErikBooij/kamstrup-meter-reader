@@ -1,0 +1,16 @@
+{
+  "serialPort": "",
+  "mqtt": {
+    "host": "",
+    "port": 0,
+    "user": "",
+    "pass": "",
+    "interval": 0,
+    "notifications": [
+      {
+        "topic": "",
+        "register": 0
+      }
+    ]
+  }
+}

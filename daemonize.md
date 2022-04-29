@@ -16,7 +16,7 @@ StartLimitBurst=5
 Restart=on-failure
 RestartSec=5s
 
-ExecStart=sudo /home/erikbooij/meter-reader-server --port /dev/ttyUSB0
+ExecStart=sudo /home/erikbooij/meter-reader-server
 
 [Install]
 WantedBy=multi-user.target
