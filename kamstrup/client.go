@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/tarm/serial"
@@ -17,6 +18,7 @@ type KamstrupClient interface {
 }
 
 type kamstrupClient struct {
+	mutex      sync.Mutex
 	serialPort *serial.Port
 }
 
@@ -45,6 +47,9 @@ func (c *kamstrupClient) ClosePort() {
 }
 
 func (c *kamstrupClient) ReadRegister(register int16) RegisterValue {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	if err := c.send(register); err != nil {
 		return errorValue(err)
 	}
