@@ -6,9 +6,10 @@
     "user": "",
     "pass": "",
     "interval": 0,
+    "prefix": "",
     "notifications": [
       {
-        "topic": "",
+        "id": "",
         "register": 0
       }
     ]
