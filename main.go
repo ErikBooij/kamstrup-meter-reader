@@ -57,7 +57,7 @@ func main() {
 		return
 	}
 
-	if err := server.CreateAndRunWebServer(kamstrupClient); err != nil {
+	if err := server.CreateAndRunWebServer(kamstrupClient, config.MQTT.Notifications); err != nil {
 		fmt.Printf("Unable to run web server (full error below), stopping.\n\n%s\n", err)
 
 		os.Exit(1)

@@ -1,9 +1,13 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
+	"heat-meter-read-client/mqtt"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"heat-meter-read-client/kamstrup"
@@ -15,7 +19,53 @@ type requestParameters struct {
 	backoff time.Duration
 }
 
-func CreateAndRunWebServer(kamstrupClient kamstrup.KamstrupClient) error {
+type registeredSensorValue struct {
+	Error  string  `json:"error,omitempty"`
+	Name   string  `json:"name"`
+	RegDec string  `json:"regDec"`
+	RegHex string  `json:"regHex"`
+	Value  float64 `json:"value"`
+}
+
+func CreateAndRunWebServer(kamstrupClient kamstrup.KamstrupClient, notifications []mqtt.MQTTNotification) error {
+	http.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
+		values := make([]registeredSensorValue, len(notifications))
+
+		i := 0
+
+		for i < len(notifications) {
+			reading := kamstrupClient.ReadRegister(notifications[i].Register)
+
+			errorValue := ""
+
+			if reading.Error() != nil {
+				errorValue = fmt.Sprintf("%s", reading.Error())
+			}
+
+			values[i] = registeredSensorValue{
+				Error:  errorValue,
+				Name:   notifications[i].ID,
+				RegDec: fmt.Sprintf("%d", notifications[i].Register),
+				RegHex: fmt.Sprintf("%x", notifications[i].Register),
+				Value:  reading.Value(),
+			}
+
+			i++
+		}
+
+		sort.SliceStable(values, func(i, j int) bool {
+			return strings.Compare(values[i].Name, values[j].Name) < 0
+		})
+
+		responseBody, _ := json.Marshal(map[string]interface{}{
+			"notifications": values,
+		})
+
+		writer.WriteHeader(http.StatusOK)
+		writer.Header().Set("Content-Type", "application/json")
+		writer.Write(responseBody)
+	})
+
 	http.HandleFunc("/read", func(writer http.ResponseWriter, request *http.Request) {
 		params := extractParameters(request)
 
