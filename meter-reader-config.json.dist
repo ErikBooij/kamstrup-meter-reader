@@ -1,5 +1,12 @@
 {
-  "serialPort": "",
+"devices": {
+    "heat-meter": {
+      "serialPort": "/dev/serial/by-id/aaa"
+    },
+    "hot-water-meter": {
+      "serialPort": "/dev/serial/by-id/bbb"
+    }
+  },
   "mqtt": {
     "host": "",
     "port": 0,
@@ -10,6 +17,7 @@
     "notifications": [
       {
         "id": "",
+        "device": "heat-meter",
         "register": 0
       }
     ]

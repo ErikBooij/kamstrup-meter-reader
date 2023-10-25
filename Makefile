@@ -2,7 +2,7 @@ build-local:
 	go build -o dist/meter-reader-macos *.go && chmod +x dist/meter-reader-macos
 
 build-remote:
-	GOOS=linux GOARCH=arm go build -o dist/meter-reader *.go && chmod +x dist/meter-reader
+	GOOS=linux GOARCH=arm GOARM=5 go build -o dist/meter-reader *.go && chmod +x dist/meter-reader
 
 deploy: build-remote kill-remote
 	scp dist/meter-reader kamstrup-meter-reader:/home/erikbooij/meter-reader-server && ssh kamstrup-meter-reader sudo systemctl restart meter-reader

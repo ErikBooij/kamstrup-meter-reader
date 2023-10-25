@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"heat-meter-read-client/mqtt"
+	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 )
 
 type requestParameters struct {
+	device  string
 	reg     int16
 	retries int
 	backoff time.Duration
@@ -27,14 +29,29 @@ type registeredSensorValue struct {
 	Value  float64 `json:"value"`
 }
 
-func CreateAndRunWebServer(kamstrupClient kamstrup.KamstrupClient, notifications []mqtt.MQTTNotification) error {
+func CreateAndRunWebServer(clients map[string]kamstrup.KamstrupClient, notifications []mqtt.MQTTNotification) error {
+	type readSensorResponse struct {
+		Error    string `json:"error,omitempty"`
+		Value    string `json:"value,omitempty"`
+		Unit     string `json:"unit,omitempty"`
+		Attempts int    `json:"attempts,omitempty"`
+	}
+
 	http.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
+		log.Printf("Received notifications request: %s" + request.URL.String())
+
 		values := make([]registeredSensorValue, len(notifications))
 
 		i := 0
 
 		for i < len(notifications) {
-			reading := kamstrupClient.ReadRegister(notifications[i].Register)
+			client, ok := clients[notifications[i].Device]
+
+			if !ok {
+				continue
+			}
+
+			reading := client.ReadRegister(notifications[i].Register)
 
 			errorValue := ""
 
@@ -67,19 +84,40 @@ func CreateAndRunWebServer(kamstrupClient kamstrup.KamstrupClient, notifications
 	})
 
 	http.HandleFunc("/read", func(writer http.ResponseWriter, request *http.Request) {
+		log.Printf("Received read request: %s" + request.URL.String())
+
 		params := extractParameters(request)
 
-		registerValue := kamstrupClient.ReadRegisterWithRetry(params.reg, params.retries, params.backoff)
+		client, ok := clients[params.device]
 
-		if registerValue.Error() != nil {
-			writer.WriteHeader(http.StatusInternalServerError)
-			writer.Write([]byte("Unable to query meter"))
+		if !ok {
+			writer.WriteHeader(http.StatusNotFound)
+			writer.Write([]byte(fmt.Sprintf("Device %s not found", params.device)))
 
 			return
 		}
 
+		registerValue, attempts := client.ReadRegisterWithRetry(params.reg, params.retries, params.backoff)
+
+		if registerValue.Error() != nil {
+			b, _ := json.Marshal(readSensorResponse{
+				Error: fmt.Sprintf("%s", registerValue.Error()),
+			})
+
+			writer.WriteHeader(http.StatusInternalServerError)
+			writer.Write(b)
+
+			return
+		}
+
+		b, _ := json.Marshal(readSensorResponse{
+			Value:    fmt.Sprintf("%.4f", registerValue.Value()),
+			Unit:     registerValue.Unit(),
+			Attempts: attempts,
+		})
+
 		writer.WriteHeader(http.StatusOK)
-		writer.Write([]byte(fmt.Sprintf("%0.2f", registerValue.Value())))
+		writer.Write(b)
 	})
 
 	return http.ListenAndServe(":80", nil)
@@ -87,6 +125,7 @@ func CreateAndRunWebServer(kamstrupClient kamstrup.KamstrupClient, notifications
 
 func extractParameters(request *http.Request) requestParameters {
 	return requestParameters{
+		device:  extractDevice(request),
 		reg:     extractRegisterNumber(request),
 		retries: extractRetries(request),
 		backoff: extractBackoff(request),
@@ -107,6 +146,10 @@ func extractBackoff(request *http.Request) time.Duration {
 	}
 
 	return time.Millisecond * time.Duration(backoffInt)
+}
+
+func extractDevice(request *http.Request) string {
+	return request.URL.Query().Get("device")
 }
 
 func extractRegisterNumber(request *http.Request) int16 {

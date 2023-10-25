@@ -7,9 +7,10 @@ type RegisterValue interface {
 }
 
 type regValue struct {
-	error error
-	unit  string
-	value float64
+	attempts int
+	error    error
+	unit     string
+	value    float64
 }
 
 func errorValue(error error) RegisterValue {

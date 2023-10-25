@@ -2,8 +2,8 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"path"
 	"time"
@@ -14,51 +14,56 @@ import (
 )
 
 type config struct {
-	Port string           `json:"serialPort"`
-	MQTT *mqtt.MQTTConfig `json:"mqtt"`
+	Devices map[string]device `json:"devices"`
+	MQTT    *mqtt.MQTTConfig  `json:"mqtt"`
+}
+
+type device struct {
+	Port string `json:"serialPort"`
 }
 
 func main() {
+	log.Println("Starting meter reader...")
+
 	config, err := loadConfig("meter-reader-config.json")
 
 	if err != nil {
-		fmt.Printf("Unable to load config. Stopping.\n\n%s\n", err)
+		log.Printf("Unable to load config. Stopping.\n\n%s\n", err)
 
 		os.Exit(1)
 
 		return
 	}
 
-	if config.Port == "" {
-		fmt.Println("No serial port provided (using --port option), stopping.")
+	log.Println("Config loaded.")
+
+	clients := make(map[string]kamstrup.KamstrupClient)
+
+	for name, device := range config.Devices {
+		clients[name] = kamstrup.CreateKamstrupClient(device.Port, time.Millisecond*500)
+
+		if err != nil {
+			log.Printf("Unable to create Kampstrup client for device %s on port %s (full error below), stopping.\n\n%s\n", name, device.Port, err)
+
+			os.Exit(1)
+
+			return
+		}
+	}
+
+	if err := mqtt.PublishValuesOverMQTT(config.MQTT, clients); err != nil {
+		log.Printf("Unable to start MQTT publisher (full error below), stopping.\n\n%s\n", err)
 
 		os.Exit(1)
 
 		return
 	}
 
-	kamstrupClient, err := kamstrup.CreateKamstrupClient(config.Port, time.Millisecond*500)
+	log.Println("MQTT publisher started.")
+	log.Println("Starting web server...")
 
-	if err != nil {
-		fmt.Printf("Unable to create Kampstrup client (full error below), stopping.\n\n%s\n", err)
-
-		os.Exit(1)
-
-		return
-	}
-
-	defer kamstrupClient.ClosePort()
-
-	if err := mqtt.PublishValuesOverMQTT(config.MQTT, kamstrupClient); err != nil {
-		fmt.Printf("Unable to start MQTT publisher (full error below), stopping.\n\n%s\n", err)
-
-		os.Exit(1)
-
-		return
-	}
-
-	if err := server.CreateAndRunWebServer(kamstrupClient, config.MQTT.Notifications); err != nil {
-		fmt.Printf("Unable to run web server (full error below), stopping.\n\n%s\n", err)
+	if err := server.CreateAndRunWebServer(clients, config.MQTT.Notifications); err != nil {
+		log.Printf("Unable to run web server (full error below), stopping.\n\n%s\n", err)
 
 		os.Exit(1)
 

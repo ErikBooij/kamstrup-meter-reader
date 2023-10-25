@@ -12,63 +12,61 @@ import (
 )
 
 type KamstrupClient interface {
-	ClosePort()
 	ReadRegister(register int16) RegisterValue
-	ReadRegisterWithRetry(register int16, retries int, backoff time.Duration) RegisterValue
+	ReadRegisterWithRetry(register int16, retries int, backoff time.Duration) (RegisterValue, int)
 }
 
 type kamstrupClient struct {
-	mutex      sync.Mutex
-	serialPort *serial.Port
+	mutex        sync.Mutex
+	serialPort   *serial.Port
+	serialConfig serial.Config
 }
 
-func CreateKamstrupClient(serialPort string, readTimeout time.Duration) (KamstrupClient, error) {
-	serialConfig := &serial.Config{
-		Name:        serialPort,
-		Baud:        1200,
-		ReadTimeout: readTimeout,
-		Parity:      serial.ParityNone,
-		StopBits:    serial.Stop2,
-	}
-
-	port, err := serial.OpenPort(serialConfig)
-
-	if err != nil {
-		return nil, err
-	}
-
+func CreateKamstrupClient(serialPort string, readTimeout time.Duration) KamstrupClient {
 	return &kamstrupClient{
-		serialPort: port,
-	}, nil
-}
-
-func (c *kamstrupClient) ClosePort() {
-	c.serialPort.Close()
+		serialConfig: serial.Config{
+			Name:        serialPort,
+			Baud:        1200,
+			ReadTimeout: readTimeout,
+			Parity:      serial.ParityNone,
+			StopBits:    serial.Stop2,
+		},
+	}
 }
 
 func (c *kamstrupClient) ReadRegister(register int16) RegisterValue {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	if err := c.send(register); err != nil {
+	port, err := serial.OpenPort(&c.serialConfig)
+
+	if err != nil {
 		return errorValue(err)
 	}
 
-	return c.receive(register)
+	defer port.Close()
+
+	if err := c.send(port, register); err != nil {
+		return errorValue(err)
+	}
+
+	return c.receive(port, register)
 }
 
-func (c *kamstrupClient) ReadRegisterWithRetry(register int16, retries int, backoff time.Duration) RegisterValue {
+func (c *kamstrupClient) ReadRegisterWithRetry(register int16, retries int, backoff time.Duration) (RegisterValue, int) {
 	regValue := c.ReadRegister(register)
 
-	for regValue.Error() != nil && retries > 0 {
+	retried := 0
+
+	for regValue.Error() != nil && retries > retried {
+		retried++
+
 		time.Sleep(backoff)
 
 		regValue = c.ReadRegister(register)
-
-		retries--
 	}
 
-	return regValue
+	return regValue, retried + 1
 }
 
 func (c *kamstrupClient) crc1021(msg []byte) int32 {
@@ -159,8 +157,8 @@ func (c *kamstrupClient) parse(raw []byte) ([]byte, error) {
 	return parsed, nil
 }
 
-func (c *kamstrupClient) receive(register int16) RegisterValue {
-	r := bufio.NewReader(c.serialPort)
+func (c *kamstrupClient) receive(port *serial.Port, register int16) RegisterValue {
+	r := bufio.NewReader(port)
 
 	buf, err := r.ReadBytes(0x0d)
 
@@ -185,7 +183,7 @@ func (c *kamstrupClient) receive(register int16) RegisterValue {
 	return registerValue(float64(int(base))*exp, unit)
 }
 
-func (c *kamstrupClient) send(register int16) error {
+func (c *kamstrupClient) send(port *serial.Port, register int16) error {
 	var prefix byte = 0x80
 	msg := []byte{0x3f, 0x10, 0x01, (byte)(register >> 8), (byte)(register & 0xff)}
 
@@ -210,7 +208,7 @@ func (c *kamstrupClient) send(register int16) error {
 
 	s = append(s, 0x0d)
 
-	_, err := c.serialPort.Write(s)
+	_, err := port.Write(s)
 
 	return err
 }
